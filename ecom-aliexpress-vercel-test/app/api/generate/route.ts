@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import OpenAI, { toFile } from "openai";
-import { isAuthed } from "@/lib/auth";
+import { isAuthed } from "../../../lib/auth";
 import {
   buildFinalPrompt,
   extractJson,
   ImageType,
   productAnalyzePrompt,
   referenceAnalyzePrompt
-} from "@/lib/prompts";
+} from "../../../lib/prompts";
 
 export const runtime = "nodejs";
 
