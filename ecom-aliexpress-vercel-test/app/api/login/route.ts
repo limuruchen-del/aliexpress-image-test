@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isPasswordValid, setAuthCookie } from "@/lib/auth";
+import { isPasswordValid, setAuthCookie } from "../../../lib/auth";
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
