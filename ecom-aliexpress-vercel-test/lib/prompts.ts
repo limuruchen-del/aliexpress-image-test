@@ -73,32 +73,40 @@ export function extractJson(text: string) {
 export function buildFinalPrompt(input: {
   imageType: ImageType;
   productAnalysis: Record<string, unknown>;
-  referenceStyle: Record<string, unknown>;
+  referenceStyle?: Record<string, unknown> | null;
   productTitle: string;
   productDescription: string;
   sellingPoints: string;
+  painPoints?: string;
   shippingTag: string;
 }) {
   const typeRules: Record<ImageType, string> = {
-    main: `Main image rules:\n- Product should occupy about 65%-75% of the image.\n- Clean white/light gray gradient background with professional shadow.\n- Reserve upper-left corner for logo placement.\n- Show no more than 3 concise English selling points.\n- Focus on click-through rate and clear conversion value.`,
-    scene: `Scene image rules:\n- Place the product in a realistic European home, kitchen, garden, garage, office, RV or outdoor setting that matches the product usage.\n- Natural warm lighting, real-life scale and perspective.\n- No people, no messy background, no floating object.\n- Scene should immediately explain why the buyer needs the product.`,
-    selling: `Selling-point image rules:\n- Show 3-4 concise English feature callouts.\n- Use clean labels, lines or small info cards pointing to real product functions.\n- Make text large and readable on mobile.\n- Do not invent functions or accessories.`,
+    main: `Main image rules:\n- Product should occupy about 65%-75% of the image.\n- Clean white/light gray gradient background with professional shadow.\n- Reserve upper-left corner for logo placement.\n- Show no more than 3 concise English selling points.\n- Focus on click-through rate, search relevance and conversion value.`,
+    scene: `Scene image rules:\n- Place the product in a realistic European home, kitchen, garden, garage, office, RV or outdoor setting that matches the product usage.\n- Natural warm lighting, real-life scale and perspective.\n- No people, no messy background, no floating object.\n- Scene should immediately explain the buyer pain point and usage reason.`,
+    selling: `Selling-point image rules:\n- Show 3-4 concise English feature callouts from the optimized selling points.\n- Use clean labels, lines or small info cards pointing to real product functions.\n- Make text large and readable on mobile.\n- Do not invent functions or accessories.`,
     parameter: `Parameter image rules:\n- Show key specs, size, capacity, package or usage information in a clean layout.\n- Use simple English labels and clear hierarchy.\n- Do not overcrowd the image.\n- Keep the product as the visual center.`
   };
 
-  return `Create a high-converting AliExpress EU product image based on the uploaded product photo and the reference image.
+  const referenceBlock = input.referenceStyle && Object.keys(input.referenceStyle).length
+    ? `Reference style JSON:\n${JSON.stringify(input.referenceStyle, null, 2)}\n\nUse the reference image only for layout, lighting, background style, composition, and selling-point presentation.`
+    : `No reference image was provided. Use a clean, professional AliExpress Europe e-commerce layout based on the selected image type.`;
+
+  return `Create a high-converting AliExpress EU product image based on the uploaded product photo.
 
 Target platform: AliExpress Europe
 Image type: ${imageTypeLabel[input.imageType]}
 
-Product title:
+Optimized AliExpress title:
 ${input.productTitle || "N/A"}
 
-Product description:
+Optimized product description:
 ${input.productDescription || "N/A"}
 
 Selling points to emphasize:
 ${input.sellingPoints || "N/A"}
+
+Customer pain points / purchase reasons:
+${input.painPoints || "N/A"}
 
 Shipping/local stock tag:
 ${input.shippingTag || "N/A"}
@@ -106,17 +114,16 @@ ${input.shippingTag || "N/A"}
 Product analysis JSON:
 ${JSON.stringify(input.productAnalysis, null, 2)}
 
-Reference style JSON:
-${JSON.stringify(input.referenceStyle, null, 2)}
+${referenceBlock}
 
 ${typeRules[input.imageType]}
 
 Strict requirements:
-1. Keep the uploaded product appearance, structure, color, proportions, and key details unchanged.
-2. Use the reference image only for layout, lighting, background style, composition, and selling-point presentation.
-3. Do not copy any brand logo, watermark, person, exact protected text, or exact competitor design from the reference image.
-4. Make the image suitable for AliExpress European buyers.
-5. Clean, professional, conversion-oriented, visually attractive.
-6. Avoid distorted perspective, floating products, fake accessories, messy composition, and inconsistent shadows.
+1. Keep the uploaded product appearance, structure, color, proportions, and key details unchanged as much as possible.
+2. Make the image suitable for AliExpress European buyers.
+3. Clean, professional, conversion-oriented, visually attractive.
+4. Avoid distorted perspective, floating products, fake accessories, messy composition, and inconsistent shadows.
+5. Do not copy any brand logo, watermark, person, exact protected text, or exact competitor design.
+6. Use clean and readable English text only when needed.
 7. Output a square 1:1 AliExpress-ready product image.`;
 }
