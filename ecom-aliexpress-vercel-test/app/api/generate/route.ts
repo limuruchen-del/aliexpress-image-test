@@ -56,20 +56,31 @@ export async function POST(req: Request) {
     const productTitle = String(form.get("productTitle") || "");
     const productDescription = String(form.get("productDescription") || "");
     const sellingPoints = String(form.get("sellingPoints") || "");
+    const painPoints = String(form.get("painPoints") || "");
     const shippingTag = String(form.get("shippingTag") || "");
+    const productAnalysisText = String(form.get("productAnalysis") || "");
 
     if (!(productImage instanceof File) || productImage.size === 0) {
       return NextResponse.json({ error: "请上传产品图" }, { status: 400 });
     }
-    if (!(referenceImage instanceof File) || referenceImage.size === 0) {
-      return NextResponse.json({ error: "请上传参考图" }, { status: 400 });
-    }
 
     const client = getClient();
-    const [productAnalysis, referenceStyle] = await Promise.all([
-      analyzeImage(client, productImage, productAnalyzePrompt),
-      analyzeImage(client, referenceImage, referenceAnalyzePrompt)
-    ]);
+    let productAnalysis: Record<string, unknown> = {};
+    if (productAnalysisText) {
+      try {
+        productAnalysis = JSON.parse(productAnalysisText);
+      } catch {
+        productAnalysis = { raw: productAnalysisText };
+      }
+    } else {
+      productAnalysis = await analyzeImage(client, productImage, productAnalyzePrompt);
+    }
+
+    let referenceStyle: Record<string, unknown> | null = null;
+    const hasReference = referenceImage instanceof File && referenceImage.size > 0;
+    if (hasReference) {
+      referenceStyle = await analyzeImage(client, referenceImage as File, referenceAnalyzePrompt);
+    }
 
     const prompt = buildFinalPrompt({
       imageType,
@@ -78,22 +89,28 @@ export async function POST(req: Request) {
       productTitle,
       productDescription,
       sellingPoints,
+      painPoints,
       shippingTag
     });
 
     const productBuffer = Buffer.from(await productImage.arrayBuffer());
-    const referenceBuffer = Buffer.from(await referenceImage.arrayBuffer());
     const productFile = await toFile(productBuffer, productImage.name || "product.png", {
       type: productImage.type || "image/png"
     });
-    const referenceFile = await toFile(referenceBuffer, referenceImage.name || "reference.png", {
-      type: referenceImage.type || "image/png"
-    });
+
+    const imageInputs: any[] = [productFile];
+    if (hasReference) {
+      const referenceBuffer = Buffer.from(await (referenceImage as File).arrayBuffer());
+      const referenceFile = await toFile(referenceBuffer, (referenceImage as File).name || "reference.png", {
+        type: (referenceImage as File).type || "image/png"
+      });
+      imageInputs.push(referenceFile);
+    }
 
     const imageModel = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
     const result = await (client.images.edit as any)({
       model: imageModel,
-      image: [productFile, referenceFile],
+      image: imageInputs,
       prompt,
       size: "1024x1024",
       quality: "medium"
@@ -108,7 +125,7 @@ export async function POST(req: Request) {
       imageBase64,
       prompt,
       productAnalysis,
-      referenceStyle
+      referenceStyle: referenceStyle || {}
     });
   } catch (err) {
     return NextResponse.json(
