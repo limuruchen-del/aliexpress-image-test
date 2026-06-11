@@ -1,46 +1,60 @@
 import { NextResponse } from "next/server";
-import OpenAI, { toFile } from "openai";
 import { isAuthed } from "../../../lib/auth";
-import {
-  buildFinalPrompt,
-  extractJson,
-  ImageType,
-  productAnalyzePrompt,
-  referenceAnalyzePrompt
-} from "../../../lib/prompts";
+import { callMiniMaxImage } from "../../../lib/minimax";
+import { buildLocalCopy } from "../../../lib/localPlanner";
 
 export const runtime = "nodejs";
 
-function getClient() {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY 未配置，请在 Vercel 环境变量里添加。 ");
-  }
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-}
+type ImageType = "main" | "scene" | "selling" | "parameter";
 
-async function fileToDataUrl(file: File) {
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const mime = file.type || "image/png";
-  return `data:${mime};base64,${buffer.toString("base64")}`;
-}
+function buildSinglePrompt(input: {
+  imageType: ImageType;
+  productTitle: string;
+  productDescription: string;
+  sellingPoints: string;
+  painPoints: string;
+  shippingTag: string;
+  productAnalysis: string;
+}) {
+  const typeRules: Record<ImageType, string> = {
+    main: "High CTR AliExpress main image, large product, clean light background, 2-3 concise feature labels, product occupies about 65%-75%.",
+    scene: "Realistic lifestyle scene image for AliExpress EU buyers, product clearly visible in a natural usage environment, warm commercial lighting.",
+    selling: "Feature selling-point image, product plus 3-4 concise feature callouts, clean mobile-readable layout.",
+    parameter: "Specification image, product plus 3-5 key specification cards, clean hierarchy and readable English text."
+  };
 
-async function analyzeImage(client: OpenAI, file: File, prompt: string) {
-  const imageUrl = await fileToDataUrl(file);
-  const model = process.env.OPENAI_VISION_MODEL || "gpt-4.1-mini";
-  const response = await client.responses.create({
-    model,
-    input: [
-      {
-        role: "user",
-        content: [
-          { type: "input_text", text: prompt },
-          { type: "input_image", image_url: imageUrl }
-        ]
-      }
-    ]
-  });
-  const outputText = (response as any).output_text || JSON.stringify((response as any).output || "");
-  return extractJson(outputText);
+  return `Create one square 1:1 AliExpress Europe ecommerce product image.
+
+Image type: ${input.imageType}
+Visual rule: ${typeRules[input.imageType] || typeRules.main}
+
+Product title:
+${input.productTitle || "N/A"}
+
+Product description:
+${input.productDescription || "N/A"}
+
+Selling points:
+${input.sellingPoints || "N/A"}
+
+Buyer pain points:
+${input.painPoints || "N/A"}
+
+Product analysis / context:
+${input.productAnalysis || "N/A"}
+
+Shipping/local stock tag:
+${input.shippingTag || "N/A"}
+
+Strict requirements:
+1. Use the uploaded product image as the product reference.
+2. Keep product appearance, structure, color, proportions and key details unchanged as much as possible.
+3. Use clean AliExpress EU commercial style.
+4. Make the product clearly visible and prominent.
+5. Use short readable English text only.
+6. Do not invent accessories, certifications, buttons, ports, functions or specifications.
+7. Avoid messy layout, distorted perspective, watermark, fake logo and unreadable text.
+8. Output a polished 1024x1024 ecommerce-ready image.`;
 }
 
 export async function POST(req: Request) {
@@ -64,72 +78,35 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "请上传产品图" }, { status: 400 });
     }
 
-    const client = getClient();
-    let productAnalysis: Record<string, unknown> = {};
-    if (productAnalysisText) {
-      try {
-        productAnalysis = JSON.parse(productAnalysisText);
-      } catch {
-        productAnalysis = { raw: productAnalysisText };
-      }
-    } else {
-      productAnalysis = await analyzeImage(client, productImage, productAnalyzePrompt);
-    }
+    const fallbackCopy = !productTitle || !productDescription
+      ? buildLocalCopy({ rawTitle: productTitle, rawDescription: productDescription, rawSpecs: "", notes: sellingPoints, shippingTag })
+      : null;
 
-    let referenceStyle: Record<string, unknown> | null = null;
-    const hasReference = referenceImage instanceof File && referenceImage.size > 0;
-    if (hasReference) {
-      referenceStyle = await analyzeImage(client, referenceImage as File, referenceAnalyzePrompt);
-    }
-
-    const prompt = buildFinalPrompt({
+    const prompt = buildSinglePrompt({
       imageType,
-      productAnalysis,
-      referenceStyle,
-      productTitle,
-      productDescription,
-      sellingPoints,
-      painPoints,
-      shippingTag
+      productTitle: productTitle || fallbackCopy?.title240 || "AliExpress Product",
+      productDescription: productDescription || fallbackCopy?.optimizedDescription || "",
+      sellingPoints: sellingPoints || fallbackCopy?.sellingPoints?.join("\n") || "",
+      painPoints: painPoints || fallbackCopy?.painPoints?.join("\n") || "",
+      shippingTag,
+      productAnalysis: productAnalysisText
     });
 
-    const productBuffer = Buffer.from(await productImage.arrayBuffer());
-    const productFile = await toFile(productBuffer, productImage.name || "product.png", {
-      type: productImage.type || "image/png"
-    });
-
-    const imageInputs: any[] = [productFile];
-    if (hasReference) {
-      const referenceBuffer = Buffer.from(await (referenceImage as File).arrayBuffer());
-      const referenceFile = await toFile(referenceBuffer, (referenceImage as File).name || "reference.png", {
-        type: (referenceImage as File).type || "image/png"
-      });
-      imageInputs.push(referenceFile);
-    }
-
-    const imageModel = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
-    const result = await (client.images.edit as any)({
-      model: imageModel,
-      image: imageInputs,
+    const imageResult = await callMiniMaxImage({
       prompt,
-      size: "1024x1024",
-      quality: "medium"
+      productImage,
+      referenceImage: referenceImage instanceof File && referenceImage.size > 0 ? referenceImage : null
     });
-
-    const imageBase64 = result?.data?.[0]?.b64_json;
-    if (!imageBase64) {
-      throw new Error("图片模型没有返回 base64 图片，请检查模型名、API 权限或返回格式。 ");
-    }
 
     return NextResponse.json({
-      imageBase64,
+      imageBase64: imageResult.imageBase64,
       prompt,
-      productAnalysis,
-      referenceStyle: referenceStyle || {}
+      productAnalysis: productAnalysisText ? { raw: productAnalysisText } : {},
+      referenceStyle: {}
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "生成失败" },
+      { error: err instanceof Error ? err.message : "MiniMax 单张生成失败" },
       { status: 500 }
     );
   }
