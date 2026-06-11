@@ -1,72 +1,8 @@
 import { NextResponse } from "next/server";
 import { isAuthed } from "../../../lib/auth";
-import { extractJson } from "../../../lib/prompts";
-import { callMiniMaxVisionJson } from "../../../lib/minimax";
+import { buildLocalCopy } from "../../../lib/localPlanner";
 
 export const runtime = "nodejs";
-
-function buildOptimizePrompt(input: {
-  rawTitle: string;
-  rawDescription: string;
-  rawSpecs: string;
-  notes: string;
-  shippingTag: string;
-}) {
-  return `You are an AliExpress Europe listing optimization expert.
-
-Analyze the uploaded product image and the seller-provided product information, then create practical listing content for AliExpress.
-
-Seller raw title:
-${input.rawTitle || "N/A"}
-
-Seller raw description:
-${input.rawDescription || "N/A"}
-
-Raw specifications:
-${input.rawSpecs || "N/A"}
-
-Seller notes / priorities:
-${input.notes || "N/A"}
-
-Local stock / delivery tag:
-${input.shippingTag || "N/A"}
-
-Return ONLY valid JSON. Do not include markdown code fences.
-
-JSON schema:
-{
-  "productAnalysis": {
-    "productCategory": "",
-    "mainColor": "",
-    "material": "",
-    "shapeStructure": "",
-    "visibleAccessories": [],
-    "useScenarios": [],
-    "keySpecs": []
-  },
-  "sellingPoints": [
-    "5-8 concise English selling points based on real visible/product info"
-  ],
-  "painPoints": [
-    "4-6 customer pain points or purchase reasons"
-  ],
-  "title240": "One AliExpress English title around 220-240 characters. Start with the core product keyword. Include main specs, functions, use scenarios and search-friendly terms. Avoid keyword stuffing and exaggerated claims.",
-  "optimizedDescription": "AliExpress English description using exactly these sections: ⭐ Features, ⚠ Specifications, 📦 Package Includes, ⭐ Why Choose This Product. Use clear concise English and avoid unsupported claims.",
-  "imageCopy": {
-    "mainImageText": ["up to 3 short English text labels for main image"],
-    "sceneImageText": ["up to 3 short English scene/pain-point labels"],
-    "sellingImageText": ["3-4 concise feature labels"],
-    "parameterImageText": ["3-5 concise spec labels"]
-  }
-}
-
-Rules:
-1. Do not invent certifications, materials, accessories, power, capacity, sizes or functions not present in the provided information.
-2. If a spec is unclear, avoid exact numeric claims.
-3. Write for European AliExpress buyers.
-4. Prefer practical purchase reasons over exaggerated marketing.
-5. Keep the title within 240 characters if possible.`;
-}
 
 export async function POST(req: Request) {
   if (!(await isAuthed())) {
@@ -89,15 +25,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "请至少填写原始描述、参数或标题之一" }, { status: 400 });
     }
 
-    const outputText = await callMiniMaxVisionJson(
-      buildOptimizePrompt({ rawTitle, rawDescription, rawSpecs, notes, shippingTag }),
-      productImage
-    );
-
-    return NextResponse.json(extractJson(outputText));
+    const data = buildLocalCopy({ rawTitle, rawDescription, rawSpecs, notes, shippingTag });
+    return NextResponse.json(data);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "优化失败" },
+      { error: err instanceof Error ? err.message : "本地优化失败" },
       { status: 500 }
     );
   }
