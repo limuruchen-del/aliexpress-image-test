@@ -1,9 +1,13 @@
 export function getMiniMaxKey() {
-  const key = process.env.MINIMAX_API_KEY;
+  const key = process.env.MINIMAX_API_KEY?.trim();
   if (!key) {
     throw new Error("MINIMAX_API_KEY 未配置，请在 Vercel 环境变量里添加。");
   }
   return key;
+}
+
+export function getMiniMaxBaseUrl() {
+  return (process.env.MINIMAX_API_BASE_URL || "https://api.minimaxi.com").replace(/\/$/, "");
 }
 
 export async function fileToBase64(file: File) {
@@ -18,10 +22,16 @@ export function compactText(text: string, max = 1450) {
   return text.replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+function miniMaxError(data: any, fallback: string) {
+  const msg = data?.error?.message || data?.base_resp?.status_msg || data?.message || data?.msg || fallback;
+  return String(msg);
+}
+
 export async function callMiniMaxVisionJson(prompt: string, image: File, maxTokens = 6000) {
   const { base64, mime } = await fileToBase64(image);
   const model = process.env.MINIMAX_TEXT_MODEL || "MiniMax-M3";
-  const res = await fetch("https://api.minimaxi.com/anthropic/v1/messages", {
+  const baseUrl = getMiniMaxBaseUrl();
+  const res = await fetch(`${baseUrl}/anthropic/v1/messages`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${getMiniMaxKey()}`,
@@ -52,7 +62,7 @@ export async function callMiniMaxVisionJson(prompt: string, image: File, maxToke
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data?.error?.message || data?.message || `MiniMax 文本/视觉接口失败：${res.status}`);
+    throw new Error(`${miniMaxError(data, `MiniMax 文本/视觉接口失败：${res.status}`)}。当前 API Base URL：${baseUrl}`);
   }
   const blocks = Array.isArray(data.content) ? data.content : [];
   const text = blocks
@@ -68,6 +78,7 @@ export async function callMiniMaxImage(input: {
   referenceImage?: File | null;
 }) {
   const model = process.env.MINIMAX_IMAGE_MODEL || "image-01";
+  const baseUrl = getMiniMaxBaseUrl();
   const body: any = {
     model,
     prompt: compactText(input.prompt, 1450),
@@ -89,7 +100,7 @@ export async function callMiniMaxImage(input: {
   }
   if (refs.length) body.subject_reference = refs;
 
-  const res = await fetch("https://api.minimaxi.com/v1/image_generation", {
+  const res = await fetch(`${baseUrl}/v1/image_generation`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${getMiniMaxKey()}`,
@@ -100,7 +111,7 @@ export async function callMiniMaxImage(input: {
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.base_resp?.status_code) {
-    throw new Error(data?.base_resp?.status_msg || data?.error?.message || data?.message || `MiniMax 图片接口失败：${res.status}`);
+    throw new Error(`${miniMaxError(data, `MiniMax 图片接口失败：${res.status}`)}。当前 API Base URL：${baseUrl}`);
   }
 
   const b64 = data?.data?.image_base64?.[0] || data?.data?.images?.[0]?.b64_json || data?.data?.image || data?.data?.base64?.[0];
