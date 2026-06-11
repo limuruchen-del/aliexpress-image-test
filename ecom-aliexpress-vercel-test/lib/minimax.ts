@@ -10,6 +10,13 @@ export function getMiniMaxBaseUrl() {
   return (process.env.MINIMAX_API_BASE_URL || "https://api.minimaxi.com").replace(/\/$/, "");
 }
 
+export function getMiniMaxPath(path: string) {
+  const groupId = process.env.MINIMAX_GROUP_ID?.trim();
+  if (!groupId) return path;
+  const joiner = path.includes("?") ? "&" : "?";
+  return `${path}${joiner}GroupId=${encodeURIComponent(groupId)}`;
+}
+
 export async function fileToBase64(file: File) {
   const buffer = Buffer.from(await file.arrayBuffer());
   return {
@@ -31,7 +38,8 @@ export async function callMiniMaxVisionJson(prompt: string, image: File, maxToke
   const { base64, mime } = await fileToBase64(image);
   const model = process.env.MINIMAX_TEXT_MODEL || "MiniMax-M3";
   const baseUrl = getMiniMaxBaseUrl();
-  const res = await fetch(`${baseUrl}/anthropic/v1/messages`, {
+  const apiPath = getMiniMaxPath("/anthropic/v1/messages");
+  const res = await fetch(`${baseUrl}${apiPath}`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${getMiniMaxKey()}`,
@@ -100,7 +108,8 @@ export async function callMiniMaxImage(input: {
   }
   if (refs.length) body.subject_reference = refs;
 
-  const res = await fetch(`${baseUrl}/v1/image_generation`, {
+  const apiPath = getMiniMaxPath("/v1/image_generation");
+  const res = await fetch(`${baseUrl}${apiPath}`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${getMiniMaxKey()}`,
@@ -125,5 +134,5 @@ export async function callMiniMaxImage(input: {
     return { imageBase64: buffer.toString("base64"), raw: data };
   }
 
-  throw new Error("MiniMax 没有返回图片，请检查模型、余额或内容安全限制。");
+  throw new Error("MiniMax 没有返回图片，请检查模型、余额或内容安全限制。信息已返回但没有识别到图片字段。");
 }
