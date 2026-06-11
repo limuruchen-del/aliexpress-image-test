@@ -1,15 +1,8 @@
 import { NextResponse } from "next/server";
-import OpenAI, { toFile } from "openai";
 import { isAuthed } from "../../../lib/auth";
+import { callMiniMaxImage } from "../../../lib/minimax";
 
 export const runtime = "nodejs";
-
-function getClient() {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY 未配置，请在 Vercel 环境变量里添加。");
-  }
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-}
 
 function buildSetImagePrompt(input: {
   plan: any;
@@ -110,38 +103,14 @@ export async function POST(req: Request) {
     const plan = JSON.parse(planText);
     const imageTask = JSON.parse(imageTaskText);
     const prompt = buildSetImagePrompt({ plan, imageTask, shippingTag });
-
-    const productBuffer = Buffer.from(await productImage.arrayBuffer());
-    const productFile = await toFile(productBuffer, productImage.name || "product.png", {
-      type: productImage.type || "image/png"
-    });
-
-    const imageInputs: any[] = [productFile];
-    if (referenceImage instanceof File && referenceImage.size > 0) {
-      const referenceBuffer = Buffer.from(await referenceImage.arrayBuffer());
-      const referenceFile = await toFile(referenceBuffer, referenceImage.name || "reference.png", {
-        type: referenceImage.type || "image/png"
-      });
-      imageInputs.push(referenceFile);
-    }
-
-    const client = getClient();
-    const imageModel = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
-    const result = await (client.images.edit as any)({
-      model: imageModel,
-      image: imageInputs,
+    const imageResult = await callMiniMaxImage({
       prompt,
-      size: "1024x1024",
-      quality: "medium"
+      productImage,
+      referenceImage: referenceImage instanceof File && referenceImage.size > 0 ? referenceImage : null
     });
-
-    const imageBase64 = result?.data?.[0]?.b64_json;
-    if (!imageBase64) {
-      throw new Error("图片模型没有返回 base64 图片，请检查模型名、API 权限或返回格式。");
-    }
 
     return NextResponse.json({
-      imageBase64,
+      imageBase64: imageResult.imageBase64,
       prompt,
       imageTask,
       slotId: imageTask.slot_id,
