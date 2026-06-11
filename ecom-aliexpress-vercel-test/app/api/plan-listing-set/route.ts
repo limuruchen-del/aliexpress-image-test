@@ -1,22 +1,9 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { isAuthed } from "../../../lib/auth";
 import { extractJson } from "../../../lib/prompts";
+import { callMiniMaxVisionJson } from "../../../lib/minimax";
 
 export const runtime = "nodejs";
-
-function getClient() {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY 未配置，请在 Vercel 环境变量里添加。");
-  }
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-}
-
-async function fileToDataUrl(file: File) {
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const mime = file.type || "image/png";
-  return `data:${mime};base64,${buffer.toString("base64")}`;
-}
 
 function buildPlanPrompt(input: {
   rawTitle: string;
@@ -151,24 +138,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "请填写标题、描述或参数" }, { status: 400 });
     }
 
-    const client = getClient();
-    const model = process.env.OPENAI_VISION_MODEL || "gpt-4.1-mini";
-    const imageUrl = await fileToDataUrl(productImage);
-    const prompt = buildPlanPrompt({ rawTitle, rawDescription, rawSpecs, notes, shippingTag });
-
-    const response = await client.responses.create({
-      model,
-      input: [
-        {
-          role: "user",
-          content: [
-            { type: "input_text", text: prompt },
-            { type: "input_image", image_url: imageUrl }
-          ]
-        }
-      ]
-    });
-    const outputText = (response as any).output_text || JSON.stringify((response as any).output || "");
+    const outputText = await callMiniMaxVisionJson(
+      buildPlanPrompt({ rawTitle, rawDescription, rawSpecs, notes, shippingTag }),
+      productImage,
+      9000
+    );
     return NextResponse.json(extractJson(outputText));
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "套图规划失败" }, { status: 500 });
